@@ -115,6 +115,36 @@ More content here.`)
 }
 ```
 
+### Keeping the author's line breaks
+
+By default a paragraph's line breaks are joined and the text is re-wrapped, as Markdown renderers do.
+A renderer can instead keep them, along with the indentation of continuation lines:
+
+```go
+renderer := navidown.NewANSIRendererWithStyle("dark").WithPreservedNewLines()
+```
+
+With that option a block such as
+
+```markdown
+The options:
+A. First option, wrapped by hand
+   onto an indented line.
+B. Second option.
+```
+
+renders as four rows. A line longer than the width still wraps, and the wrapped rows keep that line's
+indent. Headings, tables and code blocks are unaffected.
+
+A session can decide page by page, which suits a viewer that shows both hand-laid-out notes and
+ordinary documents. The function receives the source path of each page as it is rendered:
+
+```go
+session.SetPreserveNewLinesFunc(func(sourceFilePath string) bool {
+	return strings.HasSuffix(sourceFilePath, ".note.md")
+})
+```
+
 ![Build Status](https://github.com/boolean-maybe/navidown/actions/workflows/go.yml/badge.svg)
 [![Go Report Card](https://goreportcard.com/badge/github.com/boolean-maybe/navidown)](https://goreportcard.com/report/github.com/boolean-maybe/navidown)
 [![Go Reference](https://pkg.go.dev/badge/github.com/boolean-maybe/navidown.svg)](https://pkg.go.dev/github.com/boolean-maybe/navidown)

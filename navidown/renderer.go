@@ -27,8 +27,9 @@ type Renderer interface {
 
 // ANSIStyleRenderer renders markdown to ANSI using glamour.
 type ANSIStyleRenderer struct {
-	glamourStyle ansi.StyleConfig
-	wordWrap     int
+	glamourStyle     ansi.StyleConfig
+	wordWrap         int
+	preserveNewLines bool
 }
 
 func uintPtr(v uint) *uint {
@@ -129,10 +130,9 @@ func (r *ANSIStyleRenderer) WithCodeTheme(theme string) *ANSIStyleRenderer {
 		}
 	}
 
-	return &ANSIStyleRenderer{
-		glamourStyle: style,
-		wordWrap:     r.wordWrap,
-	}
+	c := *r
+	c.glamourStyle = style
+	return &c
 }
 
 // WithCodeBackground returns a new renderer with the specified code block
@@ -140,10 +140,9 @@ func (r *ANSIStyleRenderer) WithCodeTheme(theme string) *ANSIStyleRenderer {
 func (r *ANSIStyleRenderer) WithCodeBackground(color string) *ANSIStyleRenderer {
 	style := r.glamourStyle
 	style.CodeBlock.BackgroundColor = &color
-	return &ANSIStyleRenderer{
-		glamourStyle: style,
-		wordWrap:     r.wordWrap,
-	}
+	c := *r
+	c.glamourStyle = style
+	return &c
 }
 
 // WithCodeBorder returns a new renderer with the specified code block
@@ -151,18 +150,24 @@ func (r *ANSIStyleRenderer) WithCodeBackground(color string) *ANSIStyleRenderer 
 func (r *ANSIStyleRenderer) WithCodeBorder(color string) *ANSIStyleRenderer {
 	style := r.glamourStyle
 	style.CodeBlock.Color = &color
-	return &ANSIStyleRenderer{
-		glamourStyle: style,
-		wordWrap:     r.wordWrap,
-	}
+	c := *r
+	c.glamourStyle = style
+	return &c
 }
 
 // WithWordWrap returns a new renderer with specified word wrap.
 func (r *ANSIStyleRenderer) WithWordWrap(cols int) *ANSIStyleRenderer {
-	return &ANSIStyleRenderer{
-		glamourStyle: r.glamourStyle,
-		wordWrap:     cols,
-	}
+	c := *r
+	c.wordWrap = cols
+	return &c
+}
+
+// WithPreservedNewLines returns a new renderer that keeps the author's line breaks
+// and continuation indents inside paragraphs and list items.
+func (r *ANSIStyleRenderer) WithPreservedNewLines() *ANSIStyleRenderer {
+	c := *r
+	c.preserveNewLines = true
+	return &c
 }
 
 var ansiSGRPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -174,10 +179,14 @@ func stripANSIAndMarkers(s string) string {
 }
 
 func (r *ANSIStyleRenderer) Render(markdown string) (RenderResult, error) {
-	tr, err := glamour.NewTermRenderer(
+	opts := []glamour.TermRendererOption{
 		glamour.WithStyles(r.glamourStyle),
 		glamour.WithWordWrap(r.wordWrap),
-	)
+	}
+	if r.preserveNewLines {
+		opts = append(opts, glamour.WithPreservedNewLines())
+	}
+	tr, err := glamour.NewTermRenderer(opts...)
 	if err != nil {
 		return RenderResult{Lines: strings.Split(markdown, "\n"), Cleaner: LineCleanerFunc(func(s string) string { return s })}, err
 	}

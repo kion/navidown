@@ -69,7 +69,8 @@ type MarkdownSession struct {
 	correlator PositionCorrelator
 
 	// rendering
-	currentWidth int // 0 means no wrapping
+	currentWidth     int // 0 means no wrapping
+	preserveNewLines func(sourceFilePath string) bool
 
 	// behavior
 	alwaysScrollToAnchor bool
@@ -255,6 +256,13 @@ func (v *MarkdownSession) SetRenderer(r Renderer) {
 	v.renderer = r
 }
 
+// SetPreserveNewLinesFunc sets the per-page decision to keep the author's line breaks:
+// fn receives a page's source path each time that page is rendered.
+// Nil (the default) joins soft line breaks on every page.
+func (v *MarkdownSession) SetPreserveNewLinesFunc(fn func(sourceFilePath string) bool) {
+	v.preserveNewLines = fn
+}
+
 // Markdown returns the current markdown source.
 func (v *MarkdownSession) Markdown() string { return v.markdown }
 
@@ -346,7 +354,7 @@ func (v *MarkdownSession) SetWidth(cols int) bool {
 
 func (v *MarkdownSession) reRenderWithWidth(cols int) error {
 	processed := v.preprocessForRender(v.markdown)
-	rendered, err := v.rendererForWidth(cols).Render(processed)
+	rendered, err := v.rendererFor(cols, v.currentSourceFile).Render(processed)
 	if err != nil {
 		return err
 	}
@@ -358,13 +366,18 @@ func (v *MarkdownSession) reRenderWithWidth(cols int) error {
 	return nil
 }
 
-func (v *MarkdownSession) rendererForWidth(cols int) Renderer {
-	if cols > 0 {
-		if ansiRenderer, ok := v.renderer.(*ANSIStyleRenderer); ok {
-			return ansiRenderer.WithWordWrap(cols)
-		}
+func (v *MarkdownSession) rendererFor(cols int, sourceFilePath string) Renderer {
+	ansiRenderer, ok := v.renderer.(*ANSIStyleRenderer)
+	if !ok {
+		return v.renderer
 	}
-	return v.renderer
+	if cols > 0 {
+		ansiRenderer = ansiRenderer.WithWordWrap(cols)
+	}
+	if v.preserveNewLines != nil && v.preserveNewLines(sourceFilePath) {
+		ansiRenderer = ansiRenderer.WithPreservedNewLines()
+	}
+	return ansiRenderer
 }
 
 func (v *MarkdownSession) setCleaner(c LineCleaner) {
@@ -458,7 +471,7 @@ func (v *MarkdownSession) SetMarkdownWithSource(content string, sourceFilePath s
 	// Parse and render BEFORE mutating state to ensure atomicity
 	tmpElements := v.parseMarkdownWithSource([]byte(processed), sourceFilePath)
 
-	rendered, err := v.rendererForWidth(v.currentWidth).Render(processed)
+	rendered, err := v.rendererFor(v.currentWidth, sourceFilePath).Render(processed)
 	if err != nil {
 		return err // Nothing mutated, viewer still valid
 	}

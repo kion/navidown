@@ -16,6 +16,8 @@ type BlockElement struct {
 	Style   StyleBlock
 	Margin  bool
 	Newline bool
+	// KeepIndent wraps line by line, so a wrapped row keeps its line's leading indent.
+	KeepIndent bool
 }
 
 // Render renders a BlockElement.
@@ -33,11 +35,16 @@ func (e *BlockElement) Finish(w io.Writer, ctx RenderContext) error {
 	bs := ctx.blockStack
 
 	if e.Margin { //nolint: nestif
-		s := ansi.Wordwrap(
-			bs.Current().Block.String(),
-			int(bs.Width(ctx)), //nolint: gosec
-			" ,.;-+|",
-		)
+		width := int(bs.Width(ctx)) //nolint: gosec
+		s := bs.Current().Block.String()
+		if e.KeepIndent && width > 0 {
+			var err error
+			if s, err = wrapKeepingIndent(s, width, wrapBlock); err != nil {
+				return err
+			}
+		} else {
+			s = wrapBlockText(s, width)
+		}
 
 		mw := NewMarginWriter(ctx, w, bs.Current().Style)
 		if _, err := io.WriteString(mw, s); err != nil {
@@ -62,4 +69,14 @@ func (e *BlockElement) Finish(w io.Writer, ctx RenderContext) error {
 	bs.Current().Block.Reset()
 	bs.Pop()
 	return nil
+}
+
+const blockBreakpoints = " ,.;-+|"
+
+func wrapBlockText(s string, width int) string {
+	return ansi.Wordwrap(s, width, blockBreakpoints)
+}
+
+func wrapBlock(line string, width int) (string, error) {
+	return wrapBlockText(line, width), nil
 }

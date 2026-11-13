@@ -40,14 +40,12 @@ func (e *ParagraphElement) Finish(w io.Writer, ctx RenderContext) error {
 
 	mw := NewMarginWriter(ctx, w, rules)
 	if len(strings.TrimSpace(bs.Current().Block.String())) > 0 {
-		flow := wordwrap.NewWriter(int(bs.Width(ctx))) //nolint: gosec
-		flow.KeepNewlines = true
-		_, _ = flow.Write(bs.Current().Block.Bytes())
-		if err := flow.Close(); err != nil {
-			return fmt.Errorf("glamour: error closing flow: %w", err)
+		wrapped, err := e.wrap(bs.Current().Block.Bytes(), int(bs.Width(ctx)), ctx) //nolint: gosec
+		if err != nil {
+			return err
 		}
 
-		_, err := mw.Write(flow.Bytes())
+		_, err = mw.Write(wrapped)
 		if err != nil {
 			return err
 		}
@@ -60,4 +58,18 @@ func (e *ParagraphElement) Finish(w io.Writer, ctx RenderContext) error {
 	bs.Current().Block.Reset()
 	bs.Pop()
 	return nil
+}
+
+func (e *ParagraphElement) wrap(text []byte, width int, ctx RenderContext) ([]byte, error) {
+	if ctx.options.PreserveNewLines && width > 0 {
+		wrapped, err := wrapKeepingIndent(string(text), width, wrapWords)
+		return []byte(wrapped), err
+	}
+	flow := wordwrap.NewWriter(width)
+	flow.KeepNewlines = true
+	_, _ = flow.Write(text)
+	if err := flow.Close(); err != nil {
+		return nil, fmt.Errorf("glamour: error closing flow: %w", err)
+	}
+	return flow.Bytes(), nil
 }

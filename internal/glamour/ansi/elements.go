@@ -116,10 +116,11 @@ func (tr *ANSIRenderer) NewElement(node ast.Node, source []byte) Element {
 		}
 
 		e := &BlockElement{
-			Block:   &bytes.Buffer{},
-			Style:   cascadeStyle(ctx.blockStack.Current().Style, s, false),
-			Margin:  true,
-			Newline: true,
+			Block:      &bytes.Buffer{},
+			Style:      cascadeStyle(ctx.blockStack.Current().Style, s, false),
+			Margin:     true,
+			Newline:    true,
+			KeepIndent: ctx.options.PreserveNewLines,
 		}
 		return Element{
 			Entering: "\n",
@@ -128,23 +129,13 @@ func (tr *ANSIRenderer) NewElement(node ast.Node, source []byte) Element {
 		}
 
 	case ast.KindListItem:
-		var l uint
-		var e uint
-		l = 1
-		n := node
-		for n.PreviousSibling() != nil && (n.PreviousSibling().Kind() == ast.KindListItem) {
-			l++
-			n = n.PreviousSibling()
-		}
 		list, ok := node.Parent().(*ast.List)
 		if !ok {
 			return Element{}
 		}
+		var e uint
 		if list.IsOrdered() {
-			e = l
-			if list.Start != 1 {
-				e += uint(list.Start) - 1 //nolint: gosec
-			}
+			e = listItemNumber(node, list)
 		}
 
 		post := "\n"
@@ -185,14 +176,17 @@ func (tr *ANSIRenderer) NewElement(node ast.Node, source []byte) Element {
 		}
 		s := string(n.Segment.Value(source))
 
-		if n.HardLineBreak() {
+		var block ast.Node
+		if ctx.options.PreserveNewLines {
+			block = lineBlock(n)
+		}
+		if n.HardLineBreak() || (n.SoftLineBreak() && block != nil) {
 			s += "\n"
-		} else if n.SoftLineBreak() {
-			if ctx.options.PreserveNewLines {
-				s += "\n"
-			} else {
-				s += " "
+			if block != nil {
+				s += strings.Repeat(" ", continuationIndent(n, block, source, ctx.options.Styles))
 			}
+		} else if n.SoftLineBreak() {
+			s += " "
 		}
 		return Element{
 			Renderer: &BaseElement{
