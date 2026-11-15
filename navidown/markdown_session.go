@@ -645,9 +645,13 @@ func (v *MarkdownSession) correlatePositions() {
 	}
 	correlations := make([]correlation, len(v.elements))
 
+	// An element without a marker is matched by scanning every rendered line,
+	// so without the memo each line would be cleaned once per such element.
+	cleaner := memoizeCleaner(v.cleaner)
+
 	for i := range v.elements {
 		elem := &v.elements[i]
-		lineIdx, startCol, endCol, found := v.correlator.CorrelatePosition(elem, v.renderedLines, v.cleaner)
+		lineIdx, startCol, endCol, found := v.correlator.CorrelatePosition(elem, v.renderedLines, cleaner)
 		if found {
 			correlations[i] = correlation{
 				found:    true,
@@ -687,6 +691,18 @@ func (v *MarkdownSession) correlatePositions() {
 			elem.EndCol = c.endCol
 		}
 	}
+}
+
+func memoizeCleaner(c LineCleaner) LineCleaner {
+	cleaned := make(map[string]string)
+	return LineCleanerFunc(func(line string) string {
+		if out, ok := cleaned[line]; ok {
+			return out
+		}
+		out := c.Clean(line)
+		cleaned[line] = out
+		return out
+	})
 }
 
 func (v *MarkdownSession) saveCurrentState() PageState {
