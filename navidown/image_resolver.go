@@ -13,6 +13,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	_ "golang.org/x/image/bmp"  // Register BMP decoder
 	_ "golang.org/x/image/tiff" // Register TIFF decoder
@@ -240,8 +241,13 @@ func (r *ImageResolver) fetchImageBytes(url string, sourceFilePath string) ([]by
 	return os.ReadFile(resolved)
 }
 
+// A page is rendered on the caller's goroutine, often the UI's,
+// so a server that never answers must not hold it forever.
+var remoteFetchTimeout = 20 * time.Second
+
 func (r *ImageResolver) fetchHTTP(url string) ([]byte, error) {
-	resp, err := http.Get(url) //nolint:gosec // URL is user-provided, already validated by path resolver
+	client := &http.Client{Timeout: remoteFetchTimeout}
+	resp, err := client.Get(url) //nolint:gosec // URL is user-provided, already validated by path resolver
 	if err != nil {
 		return nil, fmt.Errorf("fetch image: %w", err)
 	}

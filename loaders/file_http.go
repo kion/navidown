@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/boolean-maybe/navidown/navidown"
 )
@@ -15,7 +16,7 @@ type FileHTTP struct {
 	// SearchRoots are extra directories to try when resolving relative file links.
 	SearchRoots []string
 
-	// Client is used for HTTP(S) requests; if nil, http.DefaultClient is used.
+	// Client is used for HTTP(S) requests; if nil, a client with a 20 s timeout is used.
 	Client *http.Client
 }
 
@@ -36,10 +37,14 @@ func (f *FileHTTP) FetchContent(elem navidown.NavElement) (string, error) {
 	return f.fetchFromLocal(resolvedPath)
 }
 
+// A followed link is fetched on the UI goroutine,
+// so a server that never answers must not hold it forever.
+var remoteFetchTimeout = 20 * time.Second
+
 func (f *FileHTTP) fetchFromWeb(url string) (content string, err error) {
 	client := f.Client
 	if client == nil {
-		client = http.DefaultClient
+		client = &http.Client{Timeout: remoteFetchTimeout}
 	}
 
 	resp, err := client.Get(url)
