@@ -42,6 +42,7 @@ type TextViewViewer struct {
 
 	lastSelection  selectionKey
 	lastKnownWidth int
+	drawn          bool
 
 	// imageManager handles Kitty image protocol (optional).
 	imageManager *ImageManager
@@ -155,8 +156,14 @@ func (v *TextViewViewer) ensureWidthConfigured() {
 	}
 }
 
+// Drawn reports whether the viewer has been laid out and drawn at least once.
+// Until then its width is tview's default for a new box, not the pane's,
+// so markdown set earlier is wrapped at that width and rendered again on the first draw.
+func (v *TextViewViewer) Drawn() bool { return v.drawn }
+
 // Draw handles rendering and width changes.
 func (v *TextViewViewer) Draw(screen tcell.Screen) {
+	v.drawn = true
 	_, _, width, _ := v.GetInnerRect()
 
 	// Check width change before drawing
