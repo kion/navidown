@@ -36,6 +36,7 @@ const defaultSVGScaleFactor = 1.2
 type ImageResolver struct {
 	searchRoots    []string
 	cache          sync.Map // url -> *ImageInfo
+	failed         sync.Map // url -> error
 	svgRasterizer  SVGRasterizer
 	svgRasterWidth int
 	svgScaleFactor float64
@@ -93,7 +94,27 @@ func (r *ImageResolver) Resolve(url string, sourceFilePath string) (*ImageInfo, 
 		info, _ := cached.(*ImageInfo)
 		return info, nil
 	}
+	// A page is rendered again on every resize and refresh, usually on the UI goroutine,
+	// so repeating a failure there would block it for as long as the failure takes.
+	if failure, ok := r.failed.Load(url); ok {
+		err, _ := failure.(error)
+		return nil, err
+	}
+	return r.resolve(url, sourceFilePath)
+}
 
+func (r *ImageResolver) resolve(url string, sourceFilePath string) (*ImageInfo, error) {
+	info, err := r.load(url, sourceFilePath)
+	if err != nil {
+		r.failed.Store(url, err)
+		return nil, err
+	}
+	r.failed.Delete(url)
+	r.cache.Store(url, info)
+	return info, nil
+}
+
+func (r *ImageResolver) load(url string, sourceFilePath string) (*ImageInfo, error) {
 	data, err := r.fetchImageBytes(url, sourceFilePath)
 	if err != nil {
 		return nil, err
@@ -110,13 +131,11 @@ func (r *ImageResolver) Resolve(url string, sourceFilePath string) (*ImageInfo, 
 	if err != nil {
 		return nil, fmt.Errorf("decode image %q: %w", url, err)
 	}
-
-	r.cache.Store(url, info)
 	return info, nil
 }
 
 // PreResolve resolves multiple image URLs in parallel, populating the cache.
-// Errors are silently ignored — individual Resolve calls will re-attempt.
+// Errors are silently ignored; Resolve remembers them and reports them again.
 // When a progress callback is set, every url counts toward progress (cached
 // ones included) so a determinate bar always reaches total.
 func (r *ImageResolver) PreResolve(urls []string, sourceFilePath string) {
@@ -143,10 +162,31 @@ func (r *ImageResolver) PreResolve(urls []string, sourceFilePath string) {
 	wg.Wait()
 }
 
+// RetryFailed fetches again the urls that failed before, in parallel.
+// A failure is otherwise remembered, so that later renders don't repeat it;
+// this is for a pass that runs off the UI goroutine.
+func (r *ImageResolver) RetryFailed(urls []string, sourceFilePath string) {
+	var wg sync.WaitGroup
+	for _, u := range urls {
+		if _, ok := r.failed.Load(u); !ok {
+			continue
+		}
+		wg.Add(1)
+		go func(url string) {
+			defer wg.Done()
+			// the remembered failure stays until this attempt ends,
+			// so a render on the UI goroutine meanwhile doesn't start one of its own
+			_, _ = r.resolve(url, sourceFilePath)
+		}(u)
+	}
+	wg.Wait()
+}
+
 // ClearCache flushes the URL→ImageInfo cache and delegates to the SVG
 // rasterizer cache if it's the caching variant.
 func (r *ImageResolver) ClearCache() {
 	r.cache.Range(func(key, _ any) bool { r.cache.Delete(key); return true })
+	r.failed.Range(func(key, _ any) bool { r.failed.Delete(key); return true })
 	if c, ok := r.svgRasterizer.(*CachingSVGRasterizer); ok {
 		c.ClearCache()
 	}
@@ -156,6 +196,7 @@ func (r *ImageResolver) ClearCache() {
 func (r *ImageResolver) ClearCacheForURLs(urls []string) {
 	for _, url := range urls {
 		r.cache.Delete(url)
+		r.failed.Delete(url)
 	}
 }
 

@@ -50,6 +50,7 @@ type MermaidOptions struct {
 	MinDiagramWidth int           // min rasterized width in px for narrow diagrams; 0 = disabled
 	Timeout         time.Duration // render timeout; 0 = 30s
 	CacheDir        string        // persistent cache dir; "" = auto (os.UserCacheDir()/navidown/mermaid)
+	RetryFailed     bool          // render again a diagram that failed before; for a pass off the UI goroutine
 }
 
 func (o *MermaidOptions) resolvedTheme() string {
@@ -580,6 +581,34 @@ func (r *MermaidRenderer) RenderToFile(source string) (string, error) {
 		return outputPath, nil
 	}
 
+	// A page is rendered again on every resize and refresh, usually on the UI goroutine,
+	// and a failing diagram costs seconds each time: mmdc starts a browser before it fails.
+	failureKey := r.failureKey(key)
+	if !r.opts.RetryFailed {
+		if failure, ok := failedDiagrams.Load(failureKey); ok {
+			err, _ := failure.(error)
+			return "", err
+		}
+	}
+	path, err := r.render(source, key, outputPath)
+	if err != nil {
+		failedDiagrams.Store(failureKey, err)
+		return "", err
+	}
+	failedDiagrams.Delete(failureKey)
+	return path, nil
+}
+
+// failedDiagrams is shared by all renderers, as the disk cache is: every viewer makes its own.
+var failedDiagrams sync.Map // failureKey -> error
+
+// A different mmdc may well render what this one could not.
+func (r *MermaidRenderer) failureKey(cacheKey string) string {
+	return r.mmdcPath + "\x00" + cacheKey
+}
+
+func (r *MermaidRenderer) render(source, key, outputPath string) (string, error) {
+
 	inputPath := filepath.Join(r.workDir, key+".mmd")
 
 	if err := os.WriteFile(inputPath, []byte(source), 0600); err != nil {
@@ -808,6 +837,12 @@ func (r *MermaidRenderer) naturalWidth(_ context.Context, inputPath, cfgPath, cs
 // Config and CSS files in the work directory are preserved.
 func (r *MermaidRenderer) ClearCache() {
 	r.cache.Range(func(key, _ any) bool { r.cache.Delete(key); return true })
+	failedDiagrams.Range(func(key, _ any) bool {
+		if k, _ := key.(string); strings.HasPrefix(k, r.mmdcPath+"\x00") {
+			failedDiagrams.Delete(key)
+		}
+		return true
+	})
 	entries, _ := os.ReadDir(r.workDir)
 	for _, e := range entries {
 		if strings.HasSuffix(e.Name(), ".png") {
@@ -823,6 +858,7 @@ func (r *MermaidRenderer) WorkDir() string { return r.workDir }
 func (r *MermaidRenderer) EvictKeys(keys []string) {
 	for _, key := range keys {
 		r.cache.Delete(key)
+		failedDiagrams.Delete(r.failureKey(key))
 		_ = os.Remove(filepath.Join(r.workDir, key+".png"))
 	}
 }

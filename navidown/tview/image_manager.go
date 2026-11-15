@@ -175,6 +175,10 @@ func (m *ImageManager) PreResolveImages(urls []string, sourceFilePath string) {
 	m.resolver.PreResolve(urls, sourceFilePath)
 }
 
+func (m *ImageManager) retryFailedImages(urls []string, sourceFilePath string) {
+	m.resolver.RetryFailed(urls, sourceFilePath)
+}
+
 // PreResolveMarkdown renders content to lines with a throwaway session bound to
 // this manager, warming the resolver cache for every image the markdown
 // references AND pre-rendering any mermaid/graphviz diagram blocks (when the
@@ -192,8 +196,17 @@ func (m *ImageManager) PreResolveMarkdown(
 	if maxCols <= 0 {
 		maxCols = 80
 	}
+	// Viewers render on the UI goroutine and so never repeat a failed image or diagram.
+	// This pass runs off it, which makes it the place to give them another chance.
+	images := NewKittyImageProcessor(m)
+	images.retryFailed = true
+	if mermaid != nil {
+		retrying := *mermaid
+		retrying.RetryFailed = true
+		mermaid = &retrying
+	}
 	session := nav.New(nav.Options{
-		ImagePostProcessor: NewKittyImageProcessor(m),
+		ImagePostProcessor: images,
 		MermaidOptions:     mermaid,
 		GraphvizOptions:    graphviz,
 	})

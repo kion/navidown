@@ -9,7 +9,8 @@ import (
 // KittyImageProcessor replaces image placeholder tokens with Kitty Unicode
 // placeholder lines. It uses an ImageManager to resolve images and allocate IDs.
 type KittyImageProcessor struct {
-	manager *ImageManager
+	manager     *ImageManager
+	retryFailed bool
 }
 
 // NewKittyImageProcessor creates a new processor backed by the given manager.
@@ -28,6 +29,9 @@ func (p *KittyImageProcessor) ProcessImageTokens(lines []string, sourceFilePath 
 	// first pass: collect all image URLs for parallel pre-resolution
 	urls := p.collectImageURLs(lines)
 	if len(urls) > 0 {
+		if p.retryFailed {
+			p.manager.retryFailedImages(urls, sourceFilePath)
+		}
 		p.manager.PreResolveImages(urls, sourceFilePath)
 	}
 
